@@ -40,11 +40,14 @@ const refreshHabitStreaks = async (habits) => {
   }
 
   const today = toMidnightUTC(new Date());
+  const daysAgo = (date, n) => new Date(date.getTime() - n * 86_400_000);
   const savePromises = [];
 
   for (const habit of habits) {
     const habitCheckIns = checkInsByHabit[habit._id.toString()] || [];
-    const { currentStreak, longestStreak } = calculateStreak({
+    
+    // 1. Try calculating streak assuming they checked in today (or this week)
+    let { currentStreak, longestStreak } = calculateStreak({
       checkinDate: today,
       frequency: habit.frequency,
       targetDaysPerWeek: habit.targetDaysPerWeek,
@@ -52,6 +55,25 @@ const refreshHabitStreaks = async (habits) => {
       longestStreak: habit.longestStreak,
       allCheckIns: habitCheckIns,
     });
+
+    // 2. If 0, they might just not have checked in YET for the current period.
+    // Check if they had an active streak in the PREVIOUS period (yesterday or last week).
+    if (currentStreak === 0) {
+      const fallbackDate = habit.frequency === 'daily' ? daysAgo(today, 1) : daysAgo(today, 7);
+      const fallback = calculateStreak({
+        checkinDate: fallbackDate,
+        frequency: habit.frequency,
+        targetDaysPerWeek: habit.targetDaysPerWeek,
+        habitCreatedAt: habit.createdAt,
+        longestStreak: habit.longestStreak,
+        allCheckIns: habitCheckIns,
+      });
+      
+      if (fallback.currentStreak > 0) {
+        currentStreak = fallback.currentStreak;
+        longestStreak = Math.max(longestStreak, fallback.longestStreak);
+      }
+    }
 
     if (habit.currentStreak !== currentStreak || habit.longestStreak !== longestStreak) {
       habit.currentStreak = currentStreak;
