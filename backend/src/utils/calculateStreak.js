@@ -121,39 +121,44 @@ const calculateStreak = ({
  *   4. longestStreak = max(prevLongest, currentStreak) — never decreases
  */
 const calculateDailyStreak = ({ today, habitCreatedAt, prevLongest, allCheckIns }) => {
-  // Build a Set of days with "done" status for O(1) lookups.
-  // Keys are ISO date strings like "2024-01-15".
-  const doneDays = new Set(
-    allCheckIns
-      .filter((c) => c.status === 'done')
-      .map((c) => toMidnightUTC(c.date).toISOString().slice(0, 10))
-  );
+  const doneDays = new Set();
+  const skippedDays = new Set();
+  
+  for (const ci of allCheckIns) {
+    const key = toMidnightUTC(ci.date).toISOString().slice(0, 10);
+    if (ci.status === 'done') doneDays.add(key);
+    if (ci.status === 'skipped') skippedDays.add(key);
+  }
 
   const creationDay = toMidnightUTC(habitCreatedAt);
-
-  // Today must be "done" for a streak to exist at all (the caller should only
-  // invoke this after a "done" check-in, but we guard defensively).
   const todayKey = today.toISOString().slice(0, 10);
-  if (!doneDays.has(todayKey)) {
+
+  // If today is completely missing, the streak as of today is 0.
+  // (refreshHabitStreaks will automatically fallback to yesterday if this happens).
+  if (!doneDays.has(todayKey) && !skippedDays.has(todayKey)) {
     return { currentStreak: 0, longestStreak: prevLongest };
   }
 
-  let streak = 1; // today counts
-  let cursor = daysAgo(today, 1); // start checking yesterday
+  // Today is either done or skipped.
+  let streak = doneDays.has(todayKey) ? 1 : 0;
+  let cursor = daysAgo(today, 1);
 
   while (cursor >= creationDay) {
     const key = cursor.toISOString().slice(0, 10);
     if (doneDays.has(key)) {
       streak += 1;
       cursor = daysAgo(cursor, 1);
+    } else if (skippedDays.has(key)) {
+      // Skipped day -> acts as a bridge, streak continues without incrementing
+      cursor = daysAgo(cursor, 1);
     } else {
-      // Gap found — streak ends here
-      break;
+      break; // Gap found, streak ends
     }
   }
 
   const currentStreak = streak;
   const longestStreak = Math.max(prevLongest, currentStreak);
+  
   return { currentStreak, longestStreak };
 };
 
